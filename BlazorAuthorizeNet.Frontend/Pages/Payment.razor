@@ -1,0 +1,145 @@
+﻿@page "/Payment"
+
+@implements IAsyncDisposable
+
+@inject IConfiguration Config
+@inject HttpClient HttpClient
+@inject ILogger<Payment> Logger;
+@inject IJSRuntime JS
+
+<PageTitle>Home</PageTitle>
+
+<h1>Submit Payment</h1>
+
+<section class="py-5">
+    <div class="container px-4 px-lg-5 my-5">
+        <h1>Checkout</h1>
+
+        <div class="card mb-4 p-3">
+            <h4 class="mb-3">Payment Information</h4>
+
+            <div class="mb-3">
+                <div class="form-floating">
+                    <input type="text" name="cardNumber" id="cardNumber" class="form-control" placeholder="4111111111111111" />
+                    <label for="cardNumber" class="form-label">Card Number</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col">
+                    <div class="form-floating">
+                        <input type="text" name="expMonth" id="expMonth" class="form-control" placeholder="12" />
+                        <label for="expMonth" class="form-label">Expiration Month</label>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="form-floating">
+                        <input type="text" name="expYear" id="expYear" class="form-control" placeholder="34" />
+                        <label for="expYear" class="form-label">Expiration Year</label>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="form-floating">
+                        <input type="text" name="cardCode" id="cardCode" class="form-control" placeholder="123" />
+                        <label for="cardCode" class="form-label">CVV</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <ul id="AuthNetErrors" class="validation-errors"></ul>
+
+        <div class="d-flex justify-content-end">
+            <button id="SubmitOrderButton" type="button" class="btn btn-outline-dark">
+                Place Order
+            </button>
+        </div>
+    </div>
+</section>
+
+@code {
+    // We use this to store a reference to the current Blazor component. When passed to JavaScript code, it allows
+    // JavaScript to call methods defined in this component.
+    private DotNetObjectReference<Payment>? objRef;
+
+    // This represents a JavaScript module. We use it to store a reference to Payment.razor.js and invoke functions
+    // defined in it.
+    private IJSObjectReference? module;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var response = await HttpClient.GetAsync($"{Config["WebApiUrl"]}/Health");
+
+        var status = response.StatusCode;
+        var content = await response.Content.ReadAsStringAsync();
+
+        Logger.LogInformation(
+            "Health check response: \n\t => Status: {Status} \n\t => Content: {Content}",
+            status, content
+        );
+    }
+
+    // This method initializes the reference to this Blazor component, loads the Payment.razor.js file, and calls the
+    // initializeAuthNetAcceptJs function defined in it.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Create a reference to this Blazor component which we will use below to pass to the
+            // initializeAuthNetAcceptJs function defined in Payment.razor.js.
+            objRef = DotNetObjectReference.Create(this);
+
+            // Here we're essentially issing a command to the browser's JavaScript runtime. We're using JavaScript's
+            // import statement to load the Payment.razor.js file as a module.
+            // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import
+            module = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Pages/Payment.razor.js"
+            );
+
+            // Finally, we call the initializeAuthNetAcceptJs function, passing it the DotNetObjectReference as well as
+            // a few app settings. This method initializes Accept.js on the page.
+            await module.InvokeVoidAsync(
+                "initializeAuthNetAcceptJs",
+                objRef,
+                Config["AuthNetEnvironment"] ?? "Sandbox",
+                Config["AuthNetLoginId"],
+                Config["AuthNetClientKey"]
+            );
+        }
+    }
+
+    // The DotNetObjectReference and IJSObjectReference objects need to be disposed manually.
+    public async ValueTask DisposeAsync()
+    {
+        objRef?.Dispose();
+
+        if (module is not null)
+        {
+            await module.DisposeAsync();
+        }
+    }
+
+    // The JSInvokable attribute allows this method to be invoked from JavaScript via the passed DotNetObjectReference.
+    [JSInvokable]
+    public async void SubmitOrder(string paymentMethodNonceValue, string paymentMethodNonceDescriptor)
+    {
+        // Calls the backend Web API's endpoint and sends it the nonce value and descriptor. That is, the tokenized
+        // representation of the credit card obtained from Accept.js.
+        using var response = await HttpClient.PostAsJsonAsync(
+            $"{Config["WebApiUrl"]}/Payments",
+            new
+            {
+                PaymentMethodNonceValue = paymentMethodNonceValue,
+                PaymentMethodNonceDescriptor = paymentMethodNonceDescriptor
+            }
+        );
+
+        var status = response.StatusCode;
+        var content = await response.Content.ReadAsStringAsync();
+
+        Logger.LogInformation(
+            "Payment submission response: \n\t => Status: {Status} \n\t => Content: {Content}",
+            status, content
+        );
+    }
+}
