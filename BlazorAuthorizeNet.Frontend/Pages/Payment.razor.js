@@ -38,7 +38,7 @@ function doSubmit(authNetLoginId, authNetClientKey, dotNet) {
         // ...when successful, use the DotNetObjectReference given by Blazor to call the SubmitOrder on the
         // Payment.razor component. Sending it the tokenized credit card.
         response => {
-            dotNet.invokeMethodAsync(
+            dotNet.invokeMethod(
                 "SubmitOrder",
                 response.opaqueData.dataValue,
                 response.opaqueData.dataDescriptor
@@ -86,10 +86,11 @@ function handleAuthNetResponse(response, onDone) {
         console.log("Error from Authorize.Net: ", response);
 
         displayErrors(response.messages.message);
-        enableSubmitButton();
     } else {
         onDone(response);
     }
+
+    enableSubmitButton();
 }
 
 // This function populates the "AuthNetErrors" <ul> with items containing descriptions of the errors returned by
